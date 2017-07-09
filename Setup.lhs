@@ -33,10 +33,14 @@ mungeLinePragma line = case symbols line of
 
 getLinePrag :: [String] -> Maybe String
 getLinePrag ("#" : n : string : rest)
-  | length rest <= 1   -- clang puts an extra field
+  | length rest <= 3   -- extra fields possible
   , length string >= 2 && head string == '"' && last string == '"'
   , all isDigit n
-  = Just $ "{-# LINE " ++ n ++ " " ++ string ++ " #-}"
+  = Just $ "// Original location: " ++ string ++ ", line " ++ n
+getLinePrag ("{" : "-#" : "LINE" : n : string : "#-" : ["}"])
+  | length string >= 2 && head string == '"' && last string == '"'
+  , all isDigit n
+  = Just $ "// Original location: " ++ string ++ ", line " ++ n
 getLinePrag other = Nothing
 
 symbols :: String -> [String]

@@ -41,7 +41,7 @@ Gofer-like stuff:
 >       combine [] = []
 >       combine ((a,b):(c,d):r) | a == c = combine ((a,b++d) : r)
 >       combine (a:r) = a : combine r
->
+
 
 
 Replace $$ with an arbitrary string, being careful to avoid ".." and '.'.
@@ -51,7 +51,7 @@ Replace $$ with an arbitrary string, being careful to avoid ".." and '.'.
 >   where go code acc =
 >           case code of
 >               [] -> Nothing
->
+
 >               '"'  :r    -> case reads code :: [(String,String)] of
 >                                []       -> go r ('"':acc)
 >                                (s,r'):_ -> go r' (reverse (show s) ++ acc)
@@ -74,7 +74,8 @@ Fast string-building functions.
 > interleave :: String -> [String -> String] -> String -> String
 > interleave s = foldr (\a b -> a . str s . b) id
 > interleave' :: String -> [String -> String] -> String -> String
-> interleave' s = foldr1 (\a b -> a . str s . b)
+> interleave' s l@(_:_) = foldr1 (\a b -> a . str s . b) l
+> interleave' _ [] = id
 
 > strspace :: String -> String
 > strspace = char ' '

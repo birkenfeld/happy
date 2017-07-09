@@ -8,12 +8,12 @@ Here is our mid-section datatype
 
 > module Grammar (
 >       Name,
->
+
 >       Production, Grammar(..), mangler, ErrorHandlerType(..),
->
+
 >       LRAction(..), ActionTable, Goto(..), GotoTable, Priority(..),
 >       Assoc(..),
->
+
 >       errorName, errorTok, startName, firstStartTok, dummyTok,
 >       eofName, epsilonTok
 >       ) where
@@ -207,7 +207,7 @@ This bit is a real mess, mainly because of the error message support.
 >       starts'     = case getParserNames dirs of
 >                       [] -> [TokenName "happyParse" Nothing False]
 >                       ns -> ns
->
+
 >       start_strs  = [ startName++'_':p  | (TokenName p _ _) <- starts' ]
 
 Build up a mapping from name values to strings.
@@ -248,7 +248,7 @@ Start symbols...
 Deal with priorities...
 
 >       priodir = zip [1..] (getPrios dirs)
->
+
 >       prios = [ (name,mkPrio i dir)
 >               | (i,dir) <- priodir
 >               , nm <- AbsSyn.getPrioNames dir
@@ -265,13 +265,13 @@ Translate the rules from string to name-based.
 >       convNT (nt, prods, ty)
 >         = do nt' <- mapToName nt
 >              return (nt', prods, ty)
->
+
 >       attrs = getAttributes dirs
 >       attrType = fromMaybe "HappyAttrs" (getAttributetype dirs)
->
+
 >       transRule (nt, prods, _ty)
 >         = mapM (finishRule nt) prods
->
+
 >       finishRule nt (lhs,code,line,prec)
 >         = mapWriter (\(a,e) -> (a, map (addLine line) e)) $ do
 >           lhs' <- mapM mapToName lhs
@@ -280,7 +280,7 @@ Translate the rules from string to name-based.
 >               Left s  -> do addErr ("Undeclared precedence token: " ++ s)
 >                             return (nt, lhs', code', No)
 >               Right p -> return (nt, lhs', code', p)
->
+
 >       mkPrec :: [Name] -> Maybe String -> Either String Priority
 >       mkPrec lhs prio =
 >             case prio of
@@ -300,7 +300,7 @@ Translate the rules from string to name-based.
 >   let
 >       type_env = [(nt, t) | (nt, _, Just (t,[])) <- rules] ++
 >                  [(nt, getTokenType dirs) | nt <- terminal_strs] -- XXX: Doesn't handle $$ type!
->
+
 >       fixType (ty,s) = go "" ty
 >         where go acc [] = return (reverse acc)
 >               go acc (c:r) | isLower c = -- look for a run of alphanumerics starting with a lower case letter
@@ -314,14 +314,14 @@ Translate the rules from string to name-based.
 >                                            go1 (c:cs)
 >                                          Just t -> go1 $ "(" ++ t ++ ")"
 >                            | otherwise = go (c:acc) r
->
+
 >       convType (nm, t)
 >         = do t' <- fixType t
 >              return (nm, t')
->
+
 >   -- in
 >   tys <- mapM convType [ (nm, t) | (nm, _, Just t) <- rules1 ]
->
+
 
 >   let
 >       type_array :: Array Int (Maybe String)
@@ -347,7 +347,7 @@ Get the token specs in terms of Names.
 >          lookup_prods :: Name -> [Int]
 >          lookup_prods x | x >= firstStartTok && x < first_t = arr ! x
 >          lookup_prods _ = error "lookup_prods"
->
+
 >          productions' = start_prods ++ concat rules2
 >          prod_array  = listArray (0,length productions' - 1) productions'
 >   -- in
@@ -461,7 +461,7 @@ So is this.
 >          getTokens (SubAssign _ toks)       = toks
 >          getTokens (Conditional toks)       = toks
 >          getTokens (RightmostAssign _ toks) = toks
->
+
 >          checkArity x = when (x > arity) $ addErr (show x++" out of range")
 
 
@@ -481,7 +481,7 @@ So is this.
 >            , "; happyConditions = ", formattedConditions
 >            , " } in (happyConditions,happySelfAttrs)"
 >            ]
->
+
 >  where formattedSelfRules = case selfRules of [] -> []; _ -> "{ "++formattedSelfRules'++" }"
 >        formattedSelfRules' = concat $ intersperse ", " $ map formatSelfRule selfRules
 >        formatSelfRule (SelfAssign [] toks)   = defaultAttr++" = "++(formatTokens toks)
@@ -506,7 +506,7 @@ So is this.
 >                     ," happyEmptyAttrs"
 >                     , attrUpdates
 >                     ]
->
+
 >        formattedConditions = concat $ intersperse "++" $ localConditions : (map (\i -> "happyConditions_"++(show i)) prods)
 >        localConditions = "["++(concat $ intersperse ", " $ map formatCondition conditions)++"]"
 >        formatCondition (Conditional toks) = formatTokens toks
@@ -546,7 +546,7 @@ So is this.
 >   where go code acc used =
 >           case code of
 >               [] -> return (reverse acc, used)
->
+
 >               '"'  :r    -> case reads code :: [(String,String)] of
 >                                []       -> go r ('"':acc) used
 >                                (s,r'):_ -> go r' (reverse (show s) ++ acc) used
@@ -555,13 +555,13 @@ So is this.
 >                                []       -> go r  ('\'':acc) used
 >                                (c,r'):_ -> go r' (reverse (show c) ++ acc) used
 >               '\\':'$':r -> go r ('$':acc) used
->
+
 >               '$':'>':r -- the "rightmost token"
 >                       | arity == 0 -> do addErr "$> in empty rule"
 >                                          go r acc used
 >                       | otherwise  -> go r (reverse (mkHappyVar arity) ++ acc)
 >                                        (arity : used)
->
+
 >               '$':r@(i:_) | isDigit i ->
 >                       case reads r :: [(Int,String)] of
 >                         (j,r'):_ ->
@@ -570,7 +570,7 @@ So is this.
 >                                         go r' acc used
 >                                 else go r' (reverse (mkHappyVar j) ++ acc)
 >                                        (j : used)
->                         [] -> error "doCheckCode []"
+>                         [] -> error ("doCheckCode: " ++ r)
 >               c:r  -> go r (c:acc) used
 
 > mkHappyVar :: Int -> String

@@ -182,24 +182,27 @@ here is a bit tricky, but should work in most cases.
 >             -> ParseResult b
 > lexReadCode s n c = case s of
 >       '\n':r -> \cont l ->  lexReadCode r n ('\n':c) cont (l+1)
->
+
 >       '{' :r -> lexReadCode r (n+1) ('{':c)
->
+
 >       '}' :r
 >               | n == 0    -> \cont -> returnToken cont (TokenInfo (
 >                               cleanupCode (reverse c)) TokCodeQuote) r
 >               | otherwise -> lexReadCode r (n-1) ('}':c)
->
->       '"'{-"-}:r -> lexReadString r (\ str r' ->
->                     lexReadCode r' n ('"' : (reverse str) ++ '"' : c))
->
->       a: '\'':r | isAlphaNum a -> lexReadCode r n ('\'':a:c)
->
->       '\'' :r -> lexReadSingleChar r (\ str r' ->
->                  lexReadCode r' n ((reverse str) ++ '\'' : c))
->
+
+Note: not using these rules for Rust; you have to keep balanced braces
+even in strings and comments.
+
+       '"'{-"-}:r -> lexReadString r (\ str r' ->
+                     lexReadCode r' n ('"' : (reverse str) ++ '"' : c))
+
+       a: '\'':r | isAlphaNum a -> lexReadCode r n ('\'':a:c)
+
+       '\'' :r -> lexReadSingleChar r (\ str r' ->
+                  lexReadCode r' n ((reverse str) ++ '\'' : c))
+
 >       ch:r -> lexReadCode r n (ch:c)
->
+
 >       [] -> \_cont -> lexError "No closing '}' in code segment" []
 
 ----------------------------------------------------------------------------

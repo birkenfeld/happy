@@ -394,7 +394,7 @@ The command line arguments.
 >               | DumpAction
 >               | DumpGoto
 >               | DumpLA
->
+
 >               |
 #endif
 >                 DumpVersion
@@ -403,7 +403,7 @@ The command line arguments.
 >               | OptPrettyFile (Maybe String)
 >               | OptTemplate String
 >               | OptMagicName String
->
+
 >               | OptGhcTarget
 >               | OptArrayTarget
 >               | OptUseCoercions
@@ -482,10 +482,10 @@ How would we like our code to be generated?
 >        ghc_extn   | OptUseCoercions `elem` cli = "-coerce"
 >                   | OptGhcTarget    `elem` cli = "-ghc"
 >                   | otherwise                  = ""
->
+
 >        array_extn | target == TargetArrayBased = "-arrays"
 >                   | otherwise                  = ""
->
+
 >        debug_extn | OptDebugParser `elem` cli  = "-debug"
 >                   | otherwise                  = ""
 
@@ -493,48 +493,12 @@ Note: we need -cpp at the moment because the template has some
 GHC version-dependent stuff in it.
 
 > optsToInject :: Target -> [CLIFlags] -> String
-> optsToInject tgt cli
->       | OptGhcTarget `elem` cli   = "-XMagicHash -XBangPatterns -XTypeSynonymInstances -XFlexibleInstances -cpp"
->       | tgt == TargetArrayBased   = "-cpp"
->       | OptDebugParser `elem` cli = "-cpp"
->       | otherwise                 = ""
+> optsToInject _ _ = ""
 
 > importsToInject :: [CLIFlags] -> String
-> importsToInject cli =
->     concat ["\n", import_array, import_bits,
->             glaexts_import, debug_imports, applicative_imports]
->   where
->       glaexts_import | is_ghc         = import_glaexts
->                      | otherwise      = ""
->
->       debug_imports  | is_debug       = import_debug
->                      | otherwise      = ""
->
->       applicative_imports = import_applicative
->
->       is_ghc   = OptGhcTarget `elem` cli
->       is_debug = OptDebugParser `elem` cli
+> importsToInject _ = ""
 
 CPP is turned on for -fglasgow-exts, so we can use conditional compilation:
-
-> import_glaexts :: String
-> import_glaexts = "import qualified GHC.Exts as Happy_GHC_Exts\n"
-
-> import_array :: String
-> import_array = "import qualified Data.Array as Happy_Data_Array\n"
-
-> import_bits :: String
-> import_bits = "import qualified Data.Bits as Bits\n"
-
-> import_debug :: String
-> import_debug =
->                "import qualified System.IO as Happy_System_IO\n" ++
->                "import qualified System.IO.Unsafe as Happy_System_IO_Unsafe\n" ++
->                "import qualified Debug.Trace as Happy_Debug_Trace\n"
-
-> import_applicative :: String
-> import_applicative = "import Control.Applicative(Applicative(..))\n" ++
->                      "import Control.Monad (ap)\n"
 
 ------------------------------------------------------------------------------
 Extract various command-line options.
