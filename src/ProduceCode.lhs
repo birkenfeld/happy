@@ -127,23 +127,12 @@ reduction_1, ...   :: HappyReduction a b
 These are only generated if types for *all* rules are given (and not for array
 based parsers -- types aren't as important there).
 
-type ActionReturn = Box<Fn(isize, CToken, HappyState<CToken, Box<Fn(HappyStk<HappyAbsSyn>) -> P<HappyAbsSyn>>>,
-                           Vec<HappyState<CToken, Box<Fn(HappyStk<HappyAbsSyn>) -> P<HappyAbsSyn>>>>,
-                           HappyStk<HappyAbsSyn>) -> P<HappyAbsSyn>>;
-type Action<A, B> = Box<Fn(isize, isize, CToken, HappyState<CToken, Box<Fn(B) -> P<A>>>,
-                           Vec<HappyState<CToken, Box<Fn(B) -> P<A>>>>, B) -> P<A>>;
+type Monad<T> = P<T>;
+type Token = CToken;
 
 >    produceTypes =
->        str "type ActionReturn = Box<Fn(isize, " . token . str ", HappyState<" . token
->      . str ", Box<Fn(HappyStk<HappyAbsSyn>) -> " . pty . str "<HappyAbsSyn>>>," . nl
->      . str "                           Vec<HappyState<" . token
->      . str ", Box<Fn(HappyStk<HappyAbsSyn>) -> " . pty . str "<HappyAbsSyn>>>>," . nl
->      . str "                           HappyStk<HappyAbsSyn>) -> " . pty .  str "<HappyAbsSyn>>;" . nl
->      . str "type Action<A, B> = Box<Fn(isize, isize, " . token . str ", HappyState<" . token
->      . str ", Box<Fn(B) -> " . pty . str "<A>>>," . nl
->      . str "                           Vec<HappyState<" . token . str ", Box<Fn(B) -> "
->      . pty . str "<A>>>>, B) -> " . pty . str "<A>>;" . nl . nl
->        where pty = str monad_tycon
+>        str "type Monad<T> = " . str monad_tycon . str "<T>;" . nl
+>      . str "type Token = " . token . str ";" . nl
 
 %-----------------------------------------------------------------------------
 Next, the reduction functions.   Each one has the following form:
@@ -179,21 +168,14 @@ happyMonadReduce to get polymorphic recursion.  Sigh.
 
 >    produceReduction (nt, toks, (code,vars_used), _) i
 
-Rust specific NOTE:
-
-This uses the `refute!` proc-macro to do add automagic irrefutable function
-argument patterns which Rust does not support.  The macro also librerally
-spreads `.clone()` calls around, and is pretty sensitive to the exact syntax.
-So if something looks strange, it might be required by the proc-macro.
-
 >     | is_monad_prod && (use_monad || imported_identity')
 >       = mkReductionHdr (str ", " . showInt lt) monad_reduce False
->       . str "refute! { fn " . reductionFun . str "<T>("
+>       . str "refute! {\nfn " . reductionFun . str "<T>("
 >       . stackPattern tokPatterns . str ": HappyStk<HappyAbsSyn>"
 >       . str ", tk: T) -> P<HappyAbsSyn> {" . nl
 >       . str "    happyThen({"
->       . tokLets (str code')
->       . str " }, (box move |r| { happyReturn(" . this_absSynCon . str "(r)) }))" . nl
+>       . tokLets (str code') . str " }," . nl
+>       . str "              box move |r| happyReturn(" . this_absSynCon . str "(r)))" . nl
 >       . str "}" . nl
 >       . str "}" . nl
 
@@ -201,18 +183,21 @@ So if something looks strange, it might be required by the proc-macro.
 >       = mkReductionHdr id ("happySpecReduce_" ++ show lt) (lt == 0)
 >       . str "fn " . reductionFun . str "("
 >       . interleave' ", " tokBinds . str ") -> HappyAbsSyn {" . nl
->       . str "    match (" . interleave' ", " tokVars . str ") {" . nl
 >       . case length tokPatterns of
->          1 -> str "        " . interleave' ", " tokPatterns . str " => "
->          _ -> str "        (" . interleave' ", " tokPatterns . str ") => "
->       . tokLets (this_absSynCon . char '(' . str code' . str ")") . char ',' . nl
->       . (if length tokPatterns == 0 then id else
->          str "        _ => notHappyAtAll()" . nl)
->       . str "    }\n}" . nl
+>          0 ->   str "    "
+>               . tokLets (this_absSynCon . char '(' . str code' . str ")") . nl
+>          _ ->   str "    match (" . interleave' ", " tokVars . str ") {" . nl
+>               . case length tokPatterns of
+>                  1 -> str "        " . interleave' ", " tokPatterns . str " => "
+>                  _ -> str "        (" . interleave' ", " tokPatterns . str ") => "
+>               . tokLets (this_absSynCon . char '(' . str code' . str ")") . char ',' . nl
+>               . str "        _ => notHappyAtAll()" . nl
+>               . str "    }" . nl
+>       . str "}" . nl
 
 >     | otherwise
 >       = mkReductionHdr (str ", " . showInt lt) "happyReduce" False
->       . str "refute! { fn " . reductionFun . str "("
+>       . str "refute! {\nfn " . reductionFun . str "("
 >       . stackPattern tokPatterns . str ": HappyStk<HappyAbsSyn>"
 >       . str ") -> HappyStk<HappyAbsSyn> {" . nl . str "    "
 >       . tokLets (str "HappyStk(" . this_absSynCon . char '(' . str code' .
@@ -296,23 +281,16 @@ The token conversion function.
 
 >       Just (lexer'',eof') ->
 >           str "fn happyNewToken<T: 'static, S: 'static + Clone>(action: Action<T, S>, "
->         . str "sts: Vec<HappyState<" . token . str ", Box<Fn(S) -> P<T>>>>, stk: S) -> P<T> {" . nl
+>         . str "sts: Vec<HappyState<" . token . str ", Box<FnBox(S) -> P<T>>>>, stk: S) -> P<T> {" . nl
 >         . str "    let action = Rc::new(action);" . nl
->         . str "    " . str lexer'' . str "(box move |tk| {" . nl
+>         . str "    " . str lexer'' . str "(box move |tk: Token| {" . nl
 >         . str "        let tk_ = tk.clone();" . nl
->         . str "        let stk_ = stk.clone();" . nl
->         . str "        let sts_ = sts.clone();" . nl
->         . str "        let action_ = action.clone();" . nl
->         . str "        let cont = box move |i| {" . nl
->         . str "            (action_.clone())(i, i, tk_.clone(), HappyState(Rc::new("
->         . str "apply_5_1_clone!(action_.clone()))), sts_.clone(), stk_.clone())" . nl
+>         . str "        let cont = move |i| {" . nl
+>         . str "            let action_ = action.clone();" . nl
+>         . str "            action(i, i, tk_, HappyState(Rc::new(apply_5_1_clone!(action_))), sts, stk)" . nl
 >         . str "        };" . nl
 >         . str "        match tk {" . nl
->         . str "            " . str (eof' ++ " => {") . nl
->         . str "                let action_ = action.clone();" . nl
->         . str "                action(" . eofTok . str ", " . eofTok . str ", tk, "
->         . str "HappyState(Rc::new(apply_5_1_clone!(action_))), sts.clone(), stk.clone())" . nl
->         . str "            }," . nl
+>         . str "            " . str eof' . str " => cont(" . eofTok . str ")," . nl
 >         . interleave ",\n" (map doToken token_rep)
 >         -- exhaustive already
 >         -- . str "            _ => happyError_q(tk.clone())," . nl
@@ -406,14 +384,14 @@ machinery to discard states in the parser...
 >       . foldr (.) id (map produceActions assocs_acts)
 >       . foldr (.) id (map produceGotos   (assocs gotos))
 >       . str "        _ => "
->       . mkAction default_act
+>       . mkAction default_act . nl
 
         . (case default_act of
              LR'Fail -> callHappyExpListPerState
              LR'MustFail -> callHappyExpListPerState
              _ -> str "")
 
->       . str "\n    }\n}\n\n"
+>       . str "    }" . nl . str "}" . nl . nl
 
 >       where gotos = goto' ! state
 
@@ -436,7 +414,7 @@ machinery to discard states in the parser...
                     LR'MustFail -> str " []"
                     _ -> str "")
 
->               . str ",\n"
+>               . str "," . nl
 
 >             produceGotos (t, Goto i)
 >               = actionFunction t
@@ -528,21 +506,21 @@ MonadStuff:
 >            let pcont = str monad_context
 >                pty = str monad_tycon  in
 >            str "fn happyThen<A: 'static, B: 'static>(m: " . pty . str "<A>, "
->          . str "f: Box<Fn(A) -> " . pty . str "<B>>) -> " . pty . str "<B> {" . nl
+>          . str "f: Box<FnBox(A) -> " . pty . str "<B>>) -> " . pty . str "<B> {" . nl
 >          . str "    thenP(m, f)" . nl
 >          . str "}" . nl
->          . str "fn happyReturn<A: 'static + Clone>(v: A) -> " . pty . str "<A> {" . nl
->          . str "    __return(v)" . nl
+>          . str "fn happyReturn<A: 'static>(v: A) -> " . pty . str "<A> {" . nl
+>          . str "    returnP(v)" . nl
 >          . str "}" . nl
 >          . case lexer' of
 >               Nothing -> error "no lexer is not supported"
 >               _ ->
 >                  str "fn happyThen1<A: 'static, B: 'static>(m: " . pty . str "<A>, "
->                . str "f: Box<Fn(A) -> " . pty . str "<B>>) -> " . pty . str "<B> {" . nl
+>                . str "f: Box<FnBox(A) -> " . pty . str "<B>>) -> " . pty . str "<B> {" . nl
 >                . str "    thenP(m, f)" . nl
 >                . str "}" . nl
->                . str "fn happyReturn1<A: 'static + Clone>(v: A) -> " . pty . str "<A> {" . nl
->                . str "    __return(v)" . nl
+>                . str "fn happyReturn1<A: 'static>(v: A) -> " . pty . str "<A> {" . nl
+>                . str "    returnP(v)" . nl
 >                . str "}" . nl
 >                . str "fn happyError_q<A: 'static>(tk: " . token . str ") -> " . pty . str "<A> {" . nl
 >                . str "    // TODO" . nl
