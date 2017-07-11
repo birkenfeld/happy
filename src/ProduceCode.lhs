@@ -170,13 +170,14 @@ happyMonadReduce to get polymorphic recursion.  Sigh.
 
 >     | is_monad_prod && (use_monad || imported_identity')
 >       = mkReductionHdr (str ", " . showInt lt) monad_reduce False
->       . str "refute! {\nfn " . reductionFun . str "<T>("
->       . stackPattern tokPatterns . str ": HappyStk<HappyAbsSyn>"
->       . str ", tk: T) -> P<HappyAbsSyn> {" . nl
->       . str "    happyThen({"
+>       . str "fn " . reductionFun . str "<T>(arg: Stack, tk: T) -> P<HappyAbsSyn> {" . nl
+>       . str "    match { arg } {" . nl
+>       . str "        " . stackPattern tokPatterns . str " =>" . nl
+>       . str "        happyThen({"
 >       . tokLets (str code') . str " }," . nl
->       . str "              box move |r| happyReturn(" . this_absSynCon . str "(r)))" . nl
->       . str "}" . nl
+>       . str "                  box move |r| happyReturn(" . this_absSynCon . str "(r)))," . nl
+>       . str "        _ => panic!(\"irrefutable pattern\")" . nl
+>       . str "    }" . nl
 >       . str "}" . nl
 
 >     | specReduceFun lt
@@ -197,12 +198,14 @@ happyMonadReduce to get polymorphic recursion.  Sigh.
 
 >     | otherwise
 >       = mkReductionHdr (str ", " . showInt lt) "happyReduce" False
->       . str "refute! {\nfn " . reductionFun . str "("
->       . stackPattern tokPatterns . str ": HappyStk<HappyAbsSyn>"
->       . str ") -> HappyStk<HappyAbsSyn> {" . nl . str "    "
+>       . str "fn " . reductionFun . str "(arg: Stack) -> Stack {" . nl
+>       . str "    match { arg } {" . nl
+>       . str "        " . stackPattern tokPatterns . str " =>" . nl
+>       . str "        "
 >       . tokLets (str "HappyStk(" . this_absSynCon . char '(' . str code' .
->                  str "), Some(box happyRest))") . nl
->       . str "}" . nl
+>                  str "), Some(box happyRest)),") . nl
+>       . str "        _ => panic!(\"irrefutable pattern\")" . nl
+>       . str "    }" . nl
 >       . str "}" . nl
 
 >       where
