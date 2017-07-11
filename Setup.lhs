@@ -22,6 +22,10 @@ main = defaultMainWithHooks simpleUserHooks { postBuild = myPostBuild,
                                               copyHook  = myCopy,
                                               instHook  = myInstall }
 
+noMultiNewlines ("":"":ls) = noMultiNewlines ("":ls)
+noMultiNewlines (l:ls)     = l : noMultiNewlines ls
+noMultiNewlines []         = []
+
 -- hack to turn cpp-style '# 27 "GenericTemplate.hs"' into
 -- '{-# LINE 27 "GenericTemplate.hs" #-}'.
 mungeLinePragma line = case symbols line of
@@ -36,7 +40,8 @@ getLinePrag ("#" : n : string : rest)
   | length rest <= 3   -- extra fields possible
   , length string >= 2 && head string == '"' && last string == '"'
   , all isDigit n
-  = Just $ "// Original location: " ++ string ++ ", line " ++ n
+  -- try to keep noise from CPP down when built on different systems
+  = Just ""
 getLinePrag ("{" : "-#" : "LINE" : n : string : "#-" : ["}"])
   | length string >= 2 && head string == '"' && last string == '"'
   , all isDigit n
@@ -55,7 +60,7 @@ myPostBuild _ flags _ lbi = do
       cpp_template src dst opts = do
         let tmp = dst ++ ".tmp"
         runProgram ghcProgram (["-o", tmp, "-E", "-cpp", "templates" </> src] ++ opts)
-        writeFile dst . unlines . map mungeLinePragma . lines =<< readFile tmp
+        writeFile dst . unlines . noMultiNewlines . map mungeLinePragma . lines =<< readFile tmp
         removeFile tmp
 
   sequence_ ([ cpp_template "GenericTemplate.hs" dst opts | (dst,opts) <- templates ] ++

@@ -17,3 +17,5 @@ HappyTemplate-coerce
 HappyTemplate-ghc
 .*.swp
 .*.swo
+.stack-work
+stack.yaml
