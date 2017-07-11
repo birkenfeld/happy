@@ -1,35 +1,66 @@
 // -----------------------------------------------------------------------------
-// HappyStk data type
-#[derive(Clone)]
-struct HappyStk<a>(a, Option<Box<HappyStk<a>>>);
+// Some convenient typedefs
 
-// -----------------------------------------------------------------------------
-// HappyState data type
-struct HappyState<T, F>(Rc<Box<Fn(isize, isize, T, HappyState<T, F>, Vec<HappyState<T, F>>) -> F>>);
+const ERROR_TOK: isize = 1;
 
-impl<T, F> Clone for HappyState<T, F> {
-    fn clone(&self) -> Self {
-        HappyState(self.0.clone())
+enum Cont {
+    Loop(isize, isize),
+    NewToken,
+    Accept(isize),
+}
+
+// Types to be defined by the user: Token, Error, State
+
+type Res<T> = Result<T, Error>;
+type Action = fn(&mut Parser, isize, isize) -> Res<Cont>;
+type Stack = Vec<HappyAbsSyn>;
+
+pub struct Parser {
+    pub user: State,
+    token: Token,
+    stack: Stack,
+    state: Action,
+    states: Vec<Action>,
+}
+
+impl Parser {
+    pub fn exec<F, T>(initial_state: State, do_parse: F) -> Res<(State, T)>
+        where F: FnOnce(&mut Parser) -> Res<T>
+    {
+        let mut parser = Parser {
+            user: initial_state,
+            token: CToken::CTokEof,
+            state: happyInvalid,
+            states: vec![],
+            stack: vec![]
+        };
+        let res = do_parse(&mut parser)?;
+        Ok((parser.user, res))
     }
 }
 
-// some convenient typedefs
 
-type Stack = HappyStk<HappyAbsSyn>;
-type State<T> = HappyState<Token, Box<FnBox(Stack) -> Monad<T>>>;
-
-type ActionReturn = Box<FnBox(isize, Token, State<HappyAbsSyn>, Vec<State<HappyAbsSyn>>, Stack)
-                        -> Monad<HappyAbsSyn>>;
-
-type Action<A, B> = Box<Fn(isize, isize, Token, HappyState<Token, Box<FnBox(B) -> Monad<A>>>,
-                           Vec<HappyState<Token, Box<FnBox(B) -> Monad<A>>>>, B) -> Monad<A>>;
-
+fn happyInvalid(p: &mut Parser, i: isize, j: isize) -> Res<Cont> {
+    panic!("parser not initialized correctly")
+}
 
 // -----------------------------------------------------------------------------
-// starting the parse
-fn happyParse(start_state: Action<HappyAbsSyn, Stack>) -> Monad<HappyAbsSyn> {
-    // TODO this is lazy failure
-    happyNewToken(start_state, vec![], HappyStk(HappyAbsSyn::HappyErrorToken(0), None))
+// Starting the parse
+
+fn happyParse(p: &mut Parser, start_state: Action) -> Res<HappyAbsSyn> {
+    p.state = start_state;
+    p.states.clear();
+    p.stack.clear();
+    p.stack.push(HappyAbsSyn::HappyErrorToken(0));
+    let mut cont = Cont::NewToken;
+
+    loop {
+        cont = match cont {
+            Cont::Loop(i, j) => (p.state)(p, i, j)?,
+            Cont::NewToken => happyNewToken(p)?,
+            Cont::Accept(j) => return happyAccept(p, j),
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -38,200 +69,153 @@ fn happyParse(start_state: Action<HappyAbsSyn, Stack>) -> Monad<HappyAbsSyn> {
 // If the current token is ERROR_TOK, it means we've just accepted a partial
 // parse (a %partial parser).  We must ignore the saved token on the top of
 // the stack in this case.
-fn happyAccept(j: isize, tk: Token, st: State<HappyAbsSyn>, sts: Vec<State<HappyAbsSyn>>,
-               stk: Stack) -> Monad<HappyAbsSyn> {
-    match (j, stk) {
-        (1, HappyStk(_, Some(box HappyStk(ans, _)))) => happyReturn1(ans),
-        (j, HappyStk(ans, _)) => happyReturn1(ans),
+
+fn happyAccept(p: &mut Parser, j: isize) -> Res<HappyAbsSyn> {
+    match j {
+        ERROR_TOK if p.stack.len() > 1 => {
+            p.stack.pop();
+            Ok(p.stack.pop().unwrap())
+        }
+        _ => Ok(p.stack.pop().unwrap())
     }
 }
 
 // -----------------------------------------------------------------------------
 // Shifting a token
-fn happyShift(new_state: Action<HappyAbsSyn, Stack>, _1: isize, tk: Token,
-              st: State<HappyAbsSyn>, sts: Vec<State<HappyAbsSyn>>, stk: Stack) -> Monad<HappyAbsSyn> {
-    match _1 {
-        1 => {
-            let HappyStk(x, _) = stk.clone();
-            let i = (match x {
-                HappyErrorToken(i) => {
-                    i
-                },
-                _ => unreachable!(),
-            });
 
-            let new_state = Rc::new(new_state);
-            let new_state_ = new_state.clone();
-            new_state(i, i, tk, (HappyState(Rc::new(apply_5_1_clone!(new_state_)))), __op_concat(st, sts), stk)
+fn happyShift(p: &mut Parser, new_state: Action, i: isize) -> Res<Cont> {
+    match i {
+        ERROR_TOK => {
+            let x = p.stack.pop().unwrap();
+            let i = match x {
+                HappyErrorToken(i) => i,
+                _ => unreachable!(),
+            };
+
+            p.states.push(new_state);
+            p.state = new_state;
+            Ok(Cont::Loop(i, i))
         }
         i => {
-            happyNewToken(new_state, __op_concat(st, sts), (HappyStk(HappyTerminal(tk), Some(box stk))))
+            p.states.push(p.state);
+            p.stack.push(HappyTerminal(p.token.clone()));
+            p.state = new_state;
+            Ok(Cont::NewToken)
         },
     }
 }
 
+// -----------------------------------------------------------------------------
 // happyReduce is specialised for the common cases.
 
-fn happySpecReduce_0(nt: isize, __fn: HappyAbsSyn, _2: isize, tk: Token,
-                     st: State<HappyAbsSyn>, sts: Vec<State<HappyAbsSyn>>, stk: Stack) -> Monad<HappyAbsSyn> {
-    match _2 {
-        1 => happyFail(1, tk, st, sts, stk),
+fn happySpecReduce_0(p: &mut Parser, nt: isize, val: HappyAbsSyn, j: isize) -> Res<Cont> {
+    match j {
+        ERROR_TOK => happyFail(p, ERROR_TOK),
         j => {
-            let HappyState(action) = st.clone();
-            action(nt, j, tk, st.clone(), __op_concat(st, sts))(HappyStk(__fn, Some(box stk)))
+            p.states.push(p.state);
+            p.stack.push(val);
+            Ok(Cont::Loop(nt, j))
         },
     }
 }
 
-fn happySpecReduce_1(nt: isize, __fn: Box<FnBox(HappyAbsSyn) -> HappyAbsSyn>, _2: isize, tk: Token,
-                     st: State<HappyAbsSyn>, sts: Vec<State<HappyAbsSyn>>, stk: Stack) -> Monad<HappyAbsSyn> {
-    match (_2, stk) {
-        (1, stk) => happyFail(1, tk, st, sts, stk),
-        (j, HappyStk(v1, stk_q)) => {
-            // TODO assert len > 0?
-            let st = sts.clone().remove(0);
-            let HappyState(action) = st.clone();
-            let r = __fn(v1);
-
-            action(nt, j, tk, st, sts)(HappyStk(r, stk_q))
-        }
-    }
-}
-
-fn happySpecReduce_2(nt: isize, __fn: Box<FnBox(HappyAbsSyn, HappyAbsSyn) -> HappyAbsSyn>,
-                     _2: isize, tk: Token, st: State<HappyAbsSyn>, mut sts: Vec<State<HappyAbsSyn>>,
-                     stk: Stack) -> Monad<HappyAbsSyn> {
-    match (_2, stk) {
-        (1, stk) => happyFail(1, tk, st, sts, stk),
-        (j, HappyStk(v1, Some(box HappyStk(v2, Some(box stk_q))))) => {
-            sts.remove(0);
-            let st = sts.clone().remove(0);
-            let HappyState(action) = st.clone();
-            let r = __fn(v1, v2);
-            action(nt, j, tk, st, sts)(HappyStk(r, Some(box stk_q)))
-        },
-        _ => {
-            panic!("irrefutable pattern")
-        }
-    }
-}
-
-fn happySpecReduce_3(nt: isize, __fn: Box<FnBox(HappyAbsSyn, HappyAbsSyn, HappyAbsSyn) -> HappyAbsSyn>,
-                     _2: isize, tk: Token, st: State<HappyAbsSyn>, mut stses: Vec<State<HappyAbsSyn>>,
-                     stk: Stack) -> Monad<HappyAbsSyn> {
-    match (_2, stk) {
-        (1, stk) => happyFail(1, tk, st, stses, stk),
-        (j, HappyStk(v1, Some(box HappyStk(v2, Some(box HappyStk(v3, stk_q)))))) => {
-            stses.remove(0);
-            stses.remove(0);
-            let sts = stses.clone();
-            let st = stses.clone().remove(0);
-            let HappyState(action) = st.clone();
-
-            let r = __fn(v1, v2, v3);
-            action(nt, j, tk, st, sts)(HappyStk(r, stk_q))
-        },
-        _ => {
-            panic!("irrefutable pattern")
-        }
-    }
-}
-
-fn happyReduce<T: 'static>(k: isize, nt: isize,
-                           __fn: Box<FnBox(Stack) -> Stack>,
-                           _3: isize, tk: Token,
-                           st: State<T>, sts: Vec<State<T>>, stk: Stack) -> Monad<T> {
-    match _3 {
-        1 => happyFail(1, tk, st, sts, stk),
+fn happySpecReduce_1(p: &mut Parser, nt: isize,
+                     reducer: fn(HappyAbsSyn) -> HappyAbsSyn, j: isize) -> Res<Cont> {
+    match j {
+        ERROR_TOK => happyFail(p, ERROR_TOK),
         j => {
-            let sts1 = happyDrop(k - 1, sts);
-            let st1 = sts1.clone().remove(0);
-            let HappyState(action) = st1.clone();
-            let r = __fn(stk);
-            action(nt, j, tk, st1, sts1)(r)
-        },
-    }
-}
-
-fn happyMonadReduce<T: 'static>(k: isize, nt: isize,
-                                __fn: Box<FnBox(Stack, Token) -> Monad<HappyAbsSyn>>,
-                                _3: isize, tk: Token,
-                                st: State<T>, sts: Vec<State<T>>, stk: Stack) -> Monad<T> {
-    match _3 {
-        1 => happyFail(1, tk, st, sts, stk),
-        j => {
-            let sts1 = happyDrop(k, __op_concat(st, sts));
-            let st1 = sts1.clone().remove(0);
-            let HappyState(action) = st1.clone();
-
-            let drop_stk = happyDropStk(k, stk.clone());
-
-            happyThen1(__fn(stk.clone(), tk.clone()), box move |r| {
-                action(nt, j, tk, st1, sts1)(HappyStk(r, Some(box drop_stk)))
-            })
+            let v1 = p.stack.pop().unwrap();
+            p.state = *p.states.last().unwrap();
+            let val = reducer(v1);
+            p.stack.push(val);
+            Ok(Cont::Loop(nt, j))
         }
     }
 }
 
-fn happyMonad2Reduce<T: 'static, U>(k: isize, nt: U,
-                                    __fn: Box<FnBox(Stack, Token) -> Monad<HappyAbsSyn>>,
-                                    _3: isize, tk: Token,
-                                    st: State<T>, sts: Vec<State<T>>, stk: Stack) -> Monad<T> {
-    match _3 {
-        1 => happyFail(1, tk, st, sts, stk),
+fn happySpecReduce_2(p: &mut Parser, nt: isize,
+                     reducer: fn(HappyAbsSyn, HappyAbsSyn) -> HappyAbsSyn, j: isize) -> Res<Cont> {
+    match j {
+        ERROR_TOK => happyFail(p, ERROR_TOK),
         j => {
-            let sts1 = happyDrop(k, __op_concat(st, sts));
-            let st1 = sts1.clone().remove(0);
-            let HappyState(action) = st1.clone();
-
-            let drop_stk = happyDropStk(k, stk.clone());
-
-            let new_state = action;
-
-            happyThen1(__fn(stk, tk), box move |r| {
-                happyNewToken(curry_5_1!(new_state), sts1, HappyStk(r, Some(box drop_stk)))
-            })
+            let v1 = p.stack.pop().unwrap();
+            let v2 = p.stack.pop().unwrap();
+            p.states.pop();
+            p.state = *p.states.last().unwrap();
+            let val = reducer(v1, v2);
+            p.stack.push(val);
+            Ok(Cont::Loop(nt, j))
         }
     }
 }
 
-fn happyDrop<T>(n: isize, mut l: Vec<T>) -> Vec<T> {
-    if n == 0 { l } else {
-        l.remove(0);
-        happyDrop(n - 1, l)
+fn happySpecReduce_3(p: &mut Parser, nt: isize,
+                     reducer: fn(HappyAbsSyn, HappyAbsSyn, HappyAbsSyn) -> HappyAbsSyn,
+                     j: isize) -> Res<Cont> {
+    match j {
+        ERROR_TOK => happyFail(p, ERROR_TOK),
+        j => {
+            let v1 = p.stack.pop().unwrap();
+            let v2 = p.stack.pop().unwrap();
+            let v3 = p.stack.pop().unwrap();
+            p.states.pop();
+            p.states.pop();
+            p.state = *p.states.last().unwrap();
+            let val = reducer(v1, v2, v3);
+            p.stack.push(val);
+            Ok(Cont::Loop(nt, j))
+        }
     }
 }
 
-fn happyDropStk<T>(n: isize, stk: HappyStk<T>) -> HappyStk<T> {
-    match (n, stk) {
-        (0, stk) => stk,
-        (n, HappyStk(x, Some(box xs))) => happyDropStk(n - 1, xs),
-        _ => panic!("irrefutable pattern"),
+fn happyReduce(p: &mut Parser, k: isize, nt: isize, reducer: fn(&mut Parser), j: isize) -> Res<Cont> {
+    match j {
+        ERROR_TOK => happyFail(p, ERROR_TOK),
+        j => {
+            for _ in 0..k - 1 {
+                p.states.pop();
+            }
+            p.state = *p.states.last().unwrap();
+            reducer(p);
+            Ok(Cont::Loop(nt, j))
+        }
+    }
+}
+
+fn happyResultReduce(p: &mut Parser, k: isize, nt: isize,
+                     reducer: fn(&mut Parser) -> Res<HappyAbsSyn>, j: isize) -> Res<Cont> {
+    match j {
+        ERROR_TOK => happyFail(p, ERROR_TOK),
+        j => {
+            p.states.push(p.state);
+            for _ in 0..k {
+                p.states.pop();
+            }
+            p.state = *p.states.last().unwrap();
+            let val = reducer(p)?;
+            p.stack.push(val);
+            Ok(Cont::Loop(nt, j))
+        }
     }
 }
 
 // -----------------------------------------------------------------------------
 // Moving to a new state after a reduction
-fn happyGoto(action: Action<HappyAbsSyn, Stack>, j: isize, tk: Token,
-             st: State<HappyAbsSyn>, sts: Vec<State<HappyAbsSyn>>, stk: Stack) -> Monad<HappyAbsSyn> {
-    let action = Rc::new(action);
-    let action_ = action.clone();
-    action(j, j, tk, (HappyState(Rc::new(apply_5_1_clone!(action_)))), sts, stk)
+
+fn happyGoto(p: &mut Parser, action: Action, j: isize) -> Res<Cont> {
+    p.state = action;
+    action(p, j, j)
 }
 
 // -----------------------------------------------------------------------------
 // Error recovery (ERROR_TOK is the error token)
-fn happyFail<T: 'static>(i: isize, tk: Token, old_st: State<T>, sts: Vec<State<T>>, stk: Stack) -> Monad<T> {
-    match (i, old_st, stk) {
-        (1, old_st, HappyStk(x, Some(_))) => {
-            let i = match x {
-                HappyErrorToken(i) => i,
-                _ => unreachable!(),
-            };
-            happyError_(i, tk)
-        },
-        (i, HappyState(action), stk) => {
-            action(1, 1, tk, HappyState(action.clone()), sts)(HappyStk(HappyErrorToken(i), Some(box stk)))
+
+fn happyFail(p: &mut Parser, i: isize) -> Res<Cont> {
+    match i {
+        ERROR_TOK if p.stack.len() > 0 => happyError_(p, i),
+        i => {
+            p.stack.push(HappyErrorToken(i));
+            (p.state)(p, ERROR_TOK, ERROR_TOK)
         },
     }
 }

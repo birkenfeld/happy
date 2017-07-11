@@ -10,12 +10,11 @@ The code generator.
 > import Data.Version           ( showVersion )
 > import Grammar
 > import Target                 ( Target(..) )
-> import GenUtils               ( mapDollarDollar, str, char, nl, strspace,
+> import GenUtils               ( mapDollarDollar, str, char, nl,
 >                                 interleave, interleave', maybestr,
->                                 brack, brack' )
+>                                 brack )
 
-> import Data.Maybe                     ( isJust, isNothing, fromJust )
-> import Data.Char
+> import Data.Maybe                     ( fromJust )
 > import Data.List
 
 > import Control.Monad      ( forM_ )
@@ -52,28 +51,26 @@ Produce the complete output file.
 >               , token_names = token_names'
 >               , lexer = lexer'
 >               , imported_identity = imported_identity'
->               , monad = (use_monad,monad_context,monad_tycon,monad_then,monad_return)
+>               , monad = (use_monad,_monad_context,monad_tycon,_monad_then,_monad_return)
 >               , token_specs = token_rep
 >               , token_type = token_type'
 >               , starts = starts'
->               , error_handler = error_handler'
->               , error_sig = error_sig'
->               , attributetype = attributetype'
+>               , error_handler = _error_handler'
+>               , error_sig = _error_sig'
+>               , attributetype = _attributetype'
 >               , attributes = attributes'
 >               })
 >               action goto top_options module_header module_trailer
->               target coerce ghc strict
+>               target coerce ghc _strict
 >     = ( top_opts
 >       . maybestr module_header . nl
 >       . str comment
 >               -- comment goes *after* the module header, so that we
 >               -- don't screw up any OPTIONS pragmas in the header.
 >       . produceAbsSynDecl . nl
->       . produceTypes
 >       . produceActionTable target
 >       . produceReductions
 >       . produceTokenConverter . nl
->       . produceMonadStuff
 >       . produceEntries
 >       . maybestr module_trailer . nl
 >       ) ""
@@ -82,9 +79,6 @@ Produce the complete output file.
 >    token = brack token_type'
 
 >    nowarn_opts = str "#![allow(unreachable_patterns)]" . nl
->       -- XXX Happy-generated code is full of warnings.  Some are easy to
->       -- fix, others not so easy, and others would require GHC version
->       -- #ifdefs.  For now I'm just disabling all of them.
 
 >    top_opts = nowarn_opts .
 >      case top_options of
@@ -107,7 +101,7 @@ data HappyAbsSyn a t1 .. tn
 >     | coerce = error "coerce mode not supported"
 >     | otherwise
 >       = str "#[derive(Clone)]" . nl
->       . str "enum HappyAbsSyn {" . nl
+>       . str "pub enum HappyAbsSyn {" . nl
 >       . str "    HappyTerminal" . token . str "," . nl
 >       . str "    HappyErrorToken(isize)," . nl
 >       . interleave "\n"
@@ -116,23 +110,6 @@ data HappyAbsSyn a t1 .. tn
 >           (nt_types_index ! n) == n]
 >       . str "}" . nl
 >       . str "use self::HappyAbsSyn::*;" . nl . nl
-
-%-----------------------------------------------------------------------------
-Type declarations of the form:
-
-type HappyReduction a b = ....
-action_0, action_1 :: Int -> HappyReduction a b
-reduction_1, ...   :: HappyReduction a b
-
-These are only generated if types for *all* rules are given (and not for array
-based parsers -- types aren't as important there).
-
-type Monad<T> = P<T>;
-type Token = CToken;
-
->    produceTypes =
->        str "type Monad<T> = " . str monad_tycon . str "<T>;" . nl
->      . str "type Token = " . token . str ";" . nl
 
 %-----------------------------------------------------------------------------
 Next, the reduction functions.   Each one has the following form:
@@ -170,12 +147,13 @@ happyMonadReduce to get polymorphic recursion.  Sigh.
 
 >     | is_monad_prod && (use_monad || imported_identity')
 >       = mkReductionHdr (str ", " . showInt lt) monad_reduce False
->       . str "fn " . reductionFun . str "<T>(arg: Stack, tk: T) -> P<HappyAbsSyn> {" . nl
->       . str "    match { arg } {" . nl
->       . str "        " . stackPattern tokPatterns . str " =>" . nl
->       . str "        happyThen({"
->       . tokLets (str code') . str " }," . nl
->       . str "                  box move |r| happyReturn(" . this_absSynCon . str "(r)))," . nl
+>       . str "fn " . reductionFun . str "(p: &mut Parser) -> Res<HappyAbsSyn> {" . nl
+>       . str "    match (" . tokPops . str ") {" . nl
+>       . case length tokPatterns of
+>          1 -> str "        " . interleave' ", " tokPatterns . str " => {"
+>          _ -> str "        (" . interleave' ", " tokPatterns . str ") => {"
+>       . str code' . nl
+>       . str "        }.map(" . this_absSynCon . str ")," . nl
 >       . str "        _ => panic!(\"irrefutable pattern\")" . nl
 >       . str "    }" . nl
 >       . str "}" . nl
@@ -191,19 +169,19 @@ happyMonadReduce to get polymorphic recursion.  Sigh.
 >               . case length tokPatterns of
 >                  1 -> str "        " . interleave' ", " tokPatterns . str " => "
 >                  _ -> str "        (" . interleave' ", " tokPatterns . str ") => "
->               . tokLets (this_absSynCon . char '(' . str code' . str ")") . char ',' . nl
+>               . this_absSynCon . char '(' . str code' . str ")" . char ',' . nl
 >               . str "        _ => notHappyAtAll()" . nl
 >               . str "    }" . nl
 >       . str "}" . nl
 
 >     | otherwise
 >       = mkReductionHdr (str ", " . showInt lt) "happyReduce" False
->       . str "fn " . reductionFun . str "(arg: Stack) -> Stack {" . nl
->       . str "    match { arg } {" . nl
->       . str "        " . stackPattern tokPatterns . str " =>" . nl
->       . str "        "
->       . tokLets (str "HappyStk(" . this_absSynCon . char '(' . str code' .
->                  str "), Some(box happyRest)),") . nl
+>       . str "fn " . reductionFun . str "(p: &mut Parser) {" . nl
+>       . str "    match (" . tokPops . str ") {" . nl
+>       . case length tokPatterns of
+>          1 -> str "        " . interleave' ", " tokPatterns . str " => {"
+>          _ -> str "        (" . interleave' ", " tokPatterns . str ") => {"
+>       . str "            p.stack.push(" . this_absSynCon . char '(' . str code' . str ")); }" . nl
 >       . str "        _ => panic!(\"irrefutable pattern\")" . nl
 >       . str "    }" . nl
 >       . str "}" . nl
@@ -211,10 +189,11 @@ happyMonadReduce to get polymorphic recursion.  Sigh.
 >       where
 >               (code', is_monad_prod, _monad_pass_token, monad_reduce)
 >                     = case code of
->                         '%':'%':code1 -> (code1, True, True, "happyMonad2Reduce")
+>                         '%':'%':_code1 -> error "monadPassToken not supported"
+>                                          -- (code1, True, True, "happyMonad2Reduce")
 >                         '%':'^':_code1 -> error "monadPassToken not supported"
 >                                          -- (code1, True, True, "happyMonadReduce")
->                         '%':code1     -> (code1, True, False, "happyMonadReduce")
+>                         '%':code1     -> (code1, True, False, "happyResultReduce")
 >                         _ -> (code, False, False, "")
 
 >               -- adjust the nonterminal number for the array-based parser
@@ -223,25 +202,21 @@ happyMonadReduce to get polymorphic recursion.  Sigh.
 >                           | otherwise                  = nt
 
 >               mkReductionHdr lt' s empty =
->                       str "fn " . mkReduceFun i . str "() -> ActionReturn {" . nl
->                       . str "    partial_5!(" . str s
+>                       str "fn " . mkReduceFun i . str "(p: &mut Parser, i: isize) -> Res<Cont> {" . nl
+>                       . str "    " . str s . str "(p"
 >                       . lt' . str ", " . showInt adjusted_nt . str ", "
->                       . (if empty then reductionFun . str "()" else str "box " . reductionFun)
->                       . str ")\n}" . nl . nl
+>                       . (if empty then reductionFun . str "()" else reductionFun)
+>                       . str ", i)\n}" . nl . nl
 
 >               reductionFun = str "happyReduction_" . shows i
 
->               stackPattern (t:ts) = str "HappyStk(" . t . str ", Some(box "
->                                     . stackPattern ts . str "))"
->               stackPattern []     = str "happyRest"
-
->               tokPatterns
->                | coerce = reverse (map mkDummyVar [1 .. length toks])
->                | otherwise = reverse (zipWith tokPattern [1..] toks)
+>               tokPatterns = reverse (zipWith tokPattern [1..] toks)
 
 >               tokBinds = reverse (map (\v -> mkDummyVar v . str ": HappyAbsSyn") [1 .. length toks])
 
 >               tokVars = reverse (map mkDummyVar [1 .. length toks])
+
+>               tokPops = interleave' ", " $ take (length toks) (repeat $ str "p.stack.pop().unwrap()")
 
 >               tokPattern n _ | n `notElem` vars_used = char '_'
 >               tokPattern n t | t >= firstStartTok && t < fst_term
@@ -255,24 +230,11 @@ happyMonadReduce to get polymorphic recursion.  Sigh.
 >                                  . mkHappyTerminalVar n t
 >                                  . char ')'
 
->               tokLets code''
->                  | coerce && not (null cases)
->                       = interleave "\n\t" cases
->                       . code'' . str (take (length cases) (repeat '}'))
->                  | otherwise = code''
-
->               cases = [ str "case " . extract t . strspace . mkDummyVar n
->                       . str " of { " . tokPattern n t . str " -> "
->                       | (n,t) <- zip [1..] toks,
->                         n `elem` vars_used ]
-
->               extract t | t >= firstStartTok && t < fst_term = mkHappyOut t
->                         | otherwise                     = str "happyOutTok"
+>               tokLets code'' = code''
 
 >               lt = length toks
 
->               this_absSynCon | coerce    = mkHappyIn nt
->                              | otherwise = makeAbsSynCon nt
+>               this_absSynCon = makeAbsSynCon nt
 
 %-----------------------------------------------------------------------------
 The token conversion function.
@@ -283,40 +245,34 @@ The token conversion function.
 >       Nothing -> error "no lexer is not supported";
 
 >       Just (lexer'',eof') ->
->           str "fn happyNewToken<T: 'static, S: 'static + Clone>(action: Action<T, S>, "
->         . str "sts: Vec<HappyState<" . token . str ", Box<FnBox(S) -> P<T>>>>, stk: S) -> P<T> {" . nl
->         . str "    let action = Rc::new(action);" . nl
->         . str "    " . str lexer'' . str "(box move |tk: Token| {" . nl
->         . str "        let tk_ = tk.clone();" . nl
->         . str "        let cont = move |i| {" . nl
->         . str "            let action_ = action.clone();" . nl
->         . str "            action(i, i, tk_, HappyState(Rc::new(apply_5_1_clone!(action_))), sts, stk)" . nl
->         . str "        };" . nl
->         . str "        match tk {" . nl
->         . str "            " . str eof' . str " => cont(" . eofTok . str ")," . nl
+>           str "fn happyNewToken(p: &mut Parser) -> Res<Cont> {" . nl
+>         . str "    p.token = " . str lexer'' . str "(p)?;" . nl
+>         . str "    let action = p.state;" . nl
+>         . str "    match p.token {" . nl
+>         . str "        " . str eof' . str " => action(p, " . eofTok . str ", " . eofTok . str ")," . nl
 >         . interleave ",\n" (map doToken token_rep)
 >         -- exhaustive already
 >         -- . str "            _ => happyError_q(tk.clone())," . nl
->         . str "        }" . nl
->         . str "    })\n}" . nl . nl
->         . str "fn happyError_<T: 'static>(_: isize, tk: " . token . str ") -> P<T> {" . nl
->         . str "    happyError_q(tk)" . nl
+>         . str "    }" . nl
+>         . str "}" . nl . nl
+>         . str "fn happyError_<T>(p: &mut Parser, _: isize) -> Res<T> {" . nl
+>         . str "    happyError(p)" . nl
 >         . str "}" . nl . nl
 >       }
 
 >       where
 >         eofTok = showInt eof
 >         doToken (i,tok)
->               = str "            "
+>               = str "        "
 >               . str (removeDollarDollar tok)
->               . str " => cont(" . showInt i . str ")"
+>               . str " => action(p, " . showInt i . str ", " . showInt i . str ")"
 
 Use a variable rather than '_' to replace '$$', so we can use it on
 the left hand side of '@'.
 
 >         removeDollarDollar xs = case mapDollarDollar xs of
 >                                  Nothing -> xs
->                                  Just fn -> fn "happy_dollar_dollar"
+>                                  Just fn -> fn "_"
 
 >    mkHappyTerminalVar :: Int -> Int -> String -> String
 >    mkHappyTerminalVar i t =
@@ -382,7 +338,7 @@ machinery to discard states in the parser...
 >    produceActionTable _ = error "array target not supported"
 
 >    produceStateFunction goto' (state, acts)
->       = str "fn " . mkActionName state . str "(i: isize) -> ActionReturn {\n"
+>       = str "fn " . mkActionName state . str "(p: &mut Parser, i: isize, j: isize) -> Res<Cont> {\n"
 >       . str "    match i {\n"
 >       . foldr (.) id (map produceActions assocs_acts)
 >       . foldr (.) id (map produceGotos   (assocs gotos))
@@ -421,7 +377,7 @@ machinery to discard states in the parser...
 
 >             produceGotos (t, Goto i)
 >               = actionFunction t
->               . str "partial_5!(happyGoto, curry_1_5!(" . mkActionName i . str ")),\n"
+>               . str "happyGoto(p, " . mkActionName i . str ", j)," . nl
 >             produceGotos (_, NoGoto) = id
 
 >             actionFunction t
@@ -437,11 +393,9 @@ machinery to discard states in the parser...
 >    n_terminals = length terms
 >    n_nonterminals = length nonterms - n_starts -- lose %starts
 
->    (_act_offs,_goto_offs,table,_defaults,_check,explist)
+>    (_act_offs,_goto_offs,_table,_defaults,_check,_explist)
 >       = mkTables action goto first_nonterm' fst_term
 >               n_terminals n_nonterminals n_starts (bounds token_names')
-
->    table_size = length table - 1
 
      n_rules = length prods - 1 :: Int
 
@@ -481,69 +435,6 @@ outlaw them inside { }
 
 >    makeAbsSynCon = mkAbsSynCon nt_types_index
 
-MonadStuff:
-
-  - with no %monad or %lexer:
-
-        happyThen    :: () => HappyIdentity a -> (a -> HappyIdentity b) -> HappyIdentity b
-        happyReturn  :: () => a -> HappyIdentity a
-        happyThen1   m k tks = happyThen m (\a -> k a tks)
-        happyReturn1 = \a tks -> happyReturn a
-
-  - with %monad:
-
-        happyThen    :: CONTEXT => P a -> (a -> P b) -> P b
-        happyReturn  :: CONTEXT => a -> P a
-        happyThen1   m k tks = happyThen m (\a -> k a tks)
-        happyReturn1 = \a tks -> happyReturn a
-
-  - with %monad & %lexer:
-
-        happyThen    :: CONTEXT => P a -> (a -> P b) -> P b
-        happyReturn  :: CONTEXT => a -> P a
-        happyThen1   = happyThen
-        happyReturn1 = happyReturn
-
-
->    produceMonadStuff =
->            let pcont = str monad_context
->                pty = str monad_tycon  in
->            str "fn happyThen<A: 'static, B: 'static>(m: " . pty . str "<A>, "
->          . str "f: Box<FnBox(A) -> " . pty . str "<B>>) -> " . pty . str "<B> {" . nl
->          . str "    thenP(m, f)" . nl
->          . str "}" . nl
->          . str "fn happyReturn<A: 'static>(v: A) -> " . pty . str "<A> {" . nl
->          . str "    returnP(v)" . nl
->          . str "}" . nl
->          . case lexer' of
->               Nothing -> error "no lexer is not supported"
->               _ ->
->                  str "fn happyThen1<A: 'static, B: 'static>(m: " . pty . str "<A>, "
->                . str "f: Box<FnBox(A) -> " . pty . str "<B>>) -> " . pty . str "<B> {" . nl
->                . str "    thenP(m, f)" . nl
->                . str "}" . nl
->                . str "fn happyReturn1<A: 'static>(v: A) -> " . pty . str "<A> {" . nl
->                . str "    returnP(v)" . nl
->                . str "}" . nl
->                . str "fn happyError_q<A: 'static>(tk: " . token . str ") -> " . pty . str "<A> {" . nl
->                . str "    // TODO" . nl
->                . str "    happyError()" . nl
->                . str "}" . nl . nl
-
-An error handler specified with %error is passed the current token
-when used with %lexer, but happyError (the old way but kept for
-compatibility) is not passed the current token. Also, the %errorhandlertype
-directive determins the API of the provided function.
-
->    errorHandler =
->       case error_handler' of
->               Just h  -> case error_sig' of
->                              ErrorHandlerTypeExpList -> str h
->                              ErrorHandlerTypeDefault -> str "(\\(tokens, _) -> " . str h . str " tokens)"
->               Nothing -> case lexer' of
->                               Nothing -> str "(\\(tokens, _) -> happyError tokens)"
->                               Just _  -> str "(\\(tokens, explist) -> happyError)"
-
 -----------------------------------------------------------------------------
 -- Produce the parser entry and exit points
 
@@ -555,13 +446,12 @@ directive determins the API of the provided function.
 >    produceEntry ((name, _start_nonterm, accept_nonterm, _partial), no)
 >       = str "fn "
 >       . (if null attributes' then str name else str "do_" . str name)
->       . str "() -> " . str monad_tycon . str "<" . str nt_type . str "> {" . nl
->       . str "    happyThen(happyParse(curry_1_5!(" . str "action_" . shows no
->       . str ")), box |x| match x {" . nl
->       . str "        HappyAbsSyn" . shows (nt_types_index ! accept_nonterm)
->       . str "(z) => happyReturn(z)," . nl
+>       . str "(p: &mut Parser) -> " . str monad_tycon . str "<" . str nt_type . str "> {" . nl
+>       . str "    let x = happyParse(p, action_" . shows no . str ")?;" . nl
+>       . str "    match x {" . nl
+>       . str "        HappyAbsSyn" . shows (nt_types_index ! accept_nonterm) . str "(z) => Ok(z)," . nl
 >       . str "        _ => notHappyAtAll()" . nl
->       . str "    })" .nl
+>       . str "    }" .nl
 >       . str "}" . nl
 >      where
 >        nt_type = fromJust . fromJust . lookup accept_nonterm . assocs $ nt_types
@@ -612,11 +502,11 @@ vars used in this piece of code.
 > actionVal LR'MustFail         = 0
 
 > mkAction :: LRAction -> String -> String
-> mkAction (LR'Shift i _)       = str "partial_5!(happyShift, curry_1_5!(" . mkActionName i . str "))"
-> mkAction LR'Accept            = str "box happyAccept"
-> mkAction LR'Fail              = str "box happyFail"
-> mkAction LR'MustFail          = str "box happyFail"
-> mkAction (LR'Reduce i _)      = str "happyReduce_" . shows i . str "()"
+> mkAction (LR'Shift i _)       = str "happyShift(p, " . mkActionName i . str ", j)"
+> mkAction LR'Accept            = str "Ok(Cont::Accept(j))"
+> mkAction LR'Fail              = str "happyFail(p, j)"
+> mkAction LR'MustFail          = str "happyFail(p, j)"
+> mkAction (LR'Reduce i _)      = str "happyReduce_" . shows i . str "(p, j)"
 > mkAction (LR'Multiple _ a)    = mkAction a
 
 > mkActionName :: Int -> String -> String
@@ -964,31 +854,9 @@ slot is free or not.
 > mkReduceFun n         = str "happyReduce_"  . shows n
 > mkDummyVar n          = str "happy_x_"      . shows n
 
-> mkHappyIn, mkHappyOut :: Int -> String -> String
-> mkHappyIn n           = str "happyIn"  . shows n
-> mkHappyOut n          = str "happyOut" . shows n
-
 > type_param :: Int -> Maybe String -> ShowS
 > type_param n Nothing   = char 't' . shows n
 > type_param _ (Just ty) = brack ty
 
 > specReduceFun :: Int -> Bool
 > specReduceFun = (<= 3)
-
------------------------------------------------------------------------------
--- Convert an integer to a 16-bit number encoded in \xNN\xNN format suitable
--- for placing in a string.
-
-> hexChars :: [Int] -> String
-> hexChars acts = concat (map hexChar acts)
-
-> hexChar :: Int -> String
-> hexChar i | i < 0 = hexChar (i + 65536)
-> hexChar i =  toHex (i `mod` 256) ++ toHex (i `div` 256)
-
-> toHex :: Int -> String
-> toHex i = ['\\','x', hexDig (i `div` 16), hexDig (i `mod` 16)]
-
-> hexDig :: Int -> Char
-> hexDig i | i <= 9    = chr (i + ord '0')
->          | otherwise = chr (i - 10 + ord 'a')
