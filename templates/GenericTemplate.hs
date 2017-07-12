@@ -40,7 +40,7 @@ impl Parser {
 }
 
 
-fn happyInvalid(p: &mut Parser, i: isize, j: isize) -> Res<Cont> {
+fn happyInvalid(_: &mut Parser, _: isize, _: isize) -> Res<Cont> {
     panic!("parser not initialized correctly")
 }
 
@@ -96,7 +96,7 @@ fn happyShift(p: &mut Parser, new_state: Action, i: isize) -> Res<Cont> {
             p.state = new_state;
             Ok(Cont::Loop(i, i))
         }
-        i => {
+        _ => {
             p.states.push(p.state);
             p.stack.push(HappyTerminal(p.token.clone()));
             p.state = new_state;

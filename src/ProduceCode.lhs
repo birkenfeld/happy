@@ -78,7 +78,7 @@ Produce the complete output file.
 >    n_starts = length starts'
 >    token = brack token_type'
 
->    nowarn_opts = str "#![allow(unreachable_patterns)]" . nl
+>    nowarn_opts = str "#![allow(unreachable_patterns, unused_parens)]" . nl
 
 >    top_opts = nowarn_opts .
 >      case top_options of
