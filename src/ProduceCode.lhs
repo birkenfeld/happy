@@ -100,8 +100,7 @@ data HappyAbsSyn a t1 .. tn
 >    produceAbsSynDecl
 >     | coerce = error "coerce mode not supported"
 >     | otherwise
->       = str "#[derive(Clone)]" . nl
->       . str "pub enum HappyAbsSyn {" . nl
+>       = str "pub enum HappyAbsSyn {" . nl
 >       . str "    HappyTerminal" . token . str "," . nl
 >       . str "    HappyErrorToken(isize)," . nl
 >       . interleave "\n"
