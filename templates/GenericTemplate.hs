@@ -30,7 +30,7 @@ impl Parser {
         let mut parser = Parser {
             user: initial_state,
             token: CToken::CTokEof,
-            state: happyInvalid,
+            state: happy_invalid,
             states: vec![],
             stack: vec![]
         };
@@ -40,25 +40,25 @@ impl Parser {
 }
 
 
-fn happyInvalid(_: &mut Parser, _: isize, _: isize) -> Res<Cont> {
+fn happy_invalid(_: &mut Parser, _: isize, _: isize) -> Res<Cont> {
     panic!("parser not initialized correctly")
 }
 
 // -----------------------------------------------------------------------------
 // Starting the parse
 
-fn happyParse(p: &mut Parser, start_state: Action) -> Res<HappyAbsSyn> {
+fn happy_parse(p: &mut Parser, start_state: Action) -> Res<HappyAbsSyn> {
     p.state = start_state;
     p.states.clear();
     p.stack.clear();
-    p.stack.push(HappyAbsSyn::HappyErrorToken(0));
+    p.stack.push(HappyAbsSyn::ErrorToken(0));
     let mut cont = Cont::NewToken;
 
     loop {
         cont = match cont {
             Cont::Loop(i, j) => (p.state)(p, i, j)?,
-            Cont::NewToken => happyNewToken(p)?,
-            Cont::Accept(j) => return happyAccept(p, j),
+            Cont::NewToken => happy_new_token(p)?,
+            Cont::Accept(j) => return happy_accept(p, j),
         }
     }
 }
@@ -70,7 +70,7 @@ fn happyParse(p: &mut Parser, start_state: Action) -> Res<HappyAbsSyn> {
 // parse (a %partial parser).  We must ignore the saved token on the top of
 // the stack in this case.
 
-fn happyAccept(p: &mut Parser, j: isize) -> Res<HappyAbsSyn> {
+fn happy_accept(p: &mut Parser, j: isize) -> Res<HappyAbsSyn> {
     match j {
         ERROR_TOK if p.stack.len() > 1 => {
             p.stack.pop();
@@ -83,12 +83,12 @@ fn happyAccept(p: &mut Parser, j: isize) -> Res<HappyAbsSyn> {
 // -----------------------------------------------------------------------------
 // Shifting a token
 
-fn happyShift(p: &mut Parser, new_state: Action, i: isize) -> Res<Cont> {
+fn happy_shift(p: &mut Parser, new_state: Action, i: isize) -> Res<Cont> {
     match i {
         ERROR_TOK => {
             let x = p.stack.pop().unwrap();
             let i = match x {
-                HappyErrorToken(i) => i,
+                HappyAbsSyn::ErrorToken(i) => i,
                 _ => unreachable!(),
             };
 
@@ -98,7 +98,7 @@ fn happyShift(p: &mut Parser, new_state: Action, i: isize) -> Res<Cont> {
         }
         _ => {
             p.states.push(p.state);
-            p.stack.push(HappyTerminal(p.token.clone()));
+            p.stack.push(HappyAbsSyn::Terminal(p.token.clone()));
             p.state = new_state;
             Ok(Cont::NewToken)
         },
@@ -108,9 +108,9 @@ fn happyShift(p: &mut Parser, new_state: Action, i: isize) -> Res<Cont> {
 // -----------------------------------------------------------------------------
 // happyReduce is specialised for the common cases.
 
-fn happySpecReduce_0(p: &mut Parser, nt: isize, val: HappyAbsSyn, j: isize) -> Res<Cont> {
+fn happy_spec_reduce_0(p: &mut Parser, nt: isize, val: HappyAbsSyn, j: isize) -> Res<Cont> {
     match j {
-        ERROR_TOK => happyFail(p, ERROR_TOK),
+        ERROR_TOK => happy_fail(p, ERROR_TOK),
         j => {
             p.states.push(p.state);
             p.stack.push(val);
@@ -119,10 +119,10 @@ fn happySpecReduce_0(p: &mut Parser, nt: isize, val: HappyAbsSyn, j: isize) -> R
     }
 }
 
-fn happySpecReduce_1(p: &mut Parser, nt: isize,
-                     reducer: fn(HappyAbsSyn) -> HappyAbsSyn, j: isize) -> Res<Cont> {
+fn happy_spec_reduce_1(p: &mut Parser, nt: isize,
+                       reducer: fn(HappyAbsSyn) -> HappyAbsSyn, j: isize) -> Res<Cont> {
     match j {
-        ERROR_TOK => happyFail(p, ERROR_TOK),
+        ERROR_TOK => happy_fail(p, ERROR_TOK),
         j => {
             let v1 = p.stack.pop().unwrap();
             p.state = *p.states.last().unwrap();
@@ -133,10 +133,10 @@ fn happySpecReduce_1(p: &mut Parser, nt: isize,
     }
 }
 
-fn happySpecReduce_2(p: &mut Parser, nt: isize,
-                     reducer: fn(HappyAbsSyn, HappyAbsSyn) -> HappyAbsSyn, j: isize) -> Res<Cont> {
+fn happy_spec_reduce_2(p: &mut Parser, nt: isize,
+                       reducer: fn(HappyAbsSyn, HappyAbsSyn) -> HappyAbsSyn, j: isize) -> Res<Cont> {
     match j {
-        ERROR_TOK => happyFail(p, ERROR_TOK),
+        ERROR_TOK => happy_fail(p, ERROR_TOK),
         j => {
             let v1 = p.stack.pop().unwrap();
             let v2 = p.stack.pop().unwrap();
@@ -149,11 +149,11 @@ fn happySpecReduce_2(p: &mut Parser, nt: isize,
     }
 }
 
-fn happySpecReduce_3(p: &mut Parser, nt: isize,
-                     reducer: fn(HappyAbsSyn, HappyAbsSyn, HappyAbsSyn) -> HappyAbsSyn,
-                     j: isize) -> Res<Cont> {
+fn happy_spec_reduce_3(p: &mut Parser, nt: isize,
+                       reducer: fn(HappyAbsSyn, HappyAbsSyn, HappyAbsSyn) -> HappyAbsSyn,
+                       j: isize) -> Res<Cont> {
     match j {
-        ERROR_TOK => happyFail(p, ERROR_TOK),
+        ERROR_TOK => happy_fail(p, ERROR_TOK),
         j => {
             let v1 = p.stack.pop().unwrap();
             let v2 = p.stack.pop().unwrap();
@@ -168,9 +168,9 @@ fn happySpecReduce_3(p: &mut Parser, nt: isize,
     }
 }
 
-fn happyReduce(p: &mut Parser, k: isize, nt: isize, reducer: fn(&mut Parser), j: isize) -> Res<Cont> {
+fn happy_reduce(p: &mut Parser, k: isize, nt: isize, reducer: fn(&mut Parser), j: isize) -> Res<Cont> {
     match j {
-        ERROR_TOK => happyFail(p, ERROR_TOK),
+        ERROR_TOK => happy_fail(p, ERROR_TOK),
         j => {
             for _ in 0..k - 1 {
                 p.states.pop();
@@ -182,10 +182,10 @@ fn happyReduce(p: &mut Parser, k: isize, nt: isize, reducer: fn(&mut Parser), j:
     }
 }
 
-fn happyResultReduce(p: &mut Parser, k: isize, nt: isize,
-                     reducer: fn(&mut Parser) -> Res<HappyAbsSyn>, j: isize) -> Res<Cont> {
+fn happy_result_reduce(p: &mut Parser, k: isize, nt: isize,
+                       reducer: fn(&mut Parser) -> Res<HappyAbsSyn>, j: isize) -> Res<Cont> {
     match j {
-        ERROR_TOK => happyFail(p, ERROR_TOK),
+        ERROR_TOK => happy_fail(p, ERROR_TOK),
         j => {
             p.states.push(p.state);
             for _ in 0..k {
@@ -202,7 +202,7 @@ fn happyResultReduce(p: &mut Parser, k: isize, nt: isize,
 // -----------------------------------------------------------------------------
 // Moving to a new state after a reduction
 
-fn happyGoto(p: &mut Parser, action: Action, j: isize) -> Res<Cont> {
+fn happy_goto(p: &mut Parser, action: Action, j: isize) -> Res<Cont> {
     p.state = action;
     action(p, j, j)
 }
@@ -210,18 +210,14 @@ fn happyGoto(p: &mut Parser, action: Action, j: isize) -> Res<Cont> {
 // -----------------------------------------------------------------------------
 // Error recovery (ERROR_TOK is the error token)
 
-fn happyFail(p: &mut Parser, i: isize) -> Res<Cont> {
+fn happy_fail(p: &mut Parser, i: isize) -> Res<Cont> {
     match i {
-        ERROR_TOK if p.stack.len() > 0 => happyError_(p, i),
+        ERROR_TOK if p.stack.len() > 0 => happy_error_(p, i),
         i => {
-            p.stack.push(HappyErrorToken(i));
+            p.stack.push(HappyAbsSyn::ErrorToken(i));
             (p.state)(p, ERROR_TOK, ERROR_TOK)
         },
     }
-}
-
-fn notHappyAtAll<T>() -> T {
-    panic!("Internal Happy error")
 }
 
 // end of Happy Template.
