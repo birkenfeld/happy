@@ -78,7 +78,7 @@ Produce the complete output file.
 >    n_starts = length starts'
 >    token = brack token_type'
 
->    nowarn_opts = str "#![allow(unreachable_patterns, unused_parens)]" . nl
+>    nowarn_opts = str "#![allow(unreachable_patterns, unused_parens, unused_mut)]" . nl
 
 >    top_opts = nowarn_opts .
 >      case top_options of
@@ -167,7 +167,7 @@ happyMonadReduce to get polymorphic recursion.  Sigh.
 >               . case length tokPatterns of
 >                  1 -> str "        " . interleave' ", " tokPatterns . str " => "
 >                  _ -> str "        (" . interleave' ", " tokPatterns . str ") => "
->               . this_absSynCon . char '(' . str code' . str ")" . char ',' . nl
+>               . this_absSynCon . str "({" . str code' . str "})" . char ',' . nl
 >               . str "        _ => unreachable!()" . nl
 >               . str "    }" . nl
 >       . str "}" . nl
@@ -179,7 +179,7 @@ happyMonadReduce to get polymorphic recursion.  Sigh.
 >       . case length tokPatterns of
 >          1 -> str "        " . interleave' ", " tokPatterns . str " => {"
 >          _ -> str "        (" . interleave' ", " tokPatterns . str ") => {"
->       . str "            p.stack.push(" . this_absSynCon . char '(' . str code' . str ")); }" . nl
+>       . str "            p.stack.push(" . this_absSynCon . str "({" . str code' . str "})); }" . nl
 >       . str "        _ => panic!(\"irrefutable pattern\")" . nl
 >       . str "    }" . nl
 >       . str "}" . nl
@@ -852,7 +852,7 @@ slot is free or not.
 > mkAbsSynConRef fx t      = str "HappyAbsSyn::NT" . shows (fx ! t)
 
 > mkHappyVar, mkReduceFun, mkDummyVar :: Int -> String -> String
-> mkHappyVar n          = str "happy_var_"    . shows n
+> mkHappyVar n          = str "mut happy_var_"    . shows n
 > mkReduceFun n         = str "happy_reduce_" . shows n
 > mkDummyVar n          = str "happy_x_"      . shows n
 
